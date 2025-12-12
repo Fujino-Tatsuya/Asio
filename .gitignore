@@ -1,0 +1,38 @@
+# Precompiled Headers
+*.pch
+*.gch
+*.pchi
+*.idb
+*.pdb
+
+# Visual Studio build cache
+*.obj
+*.o
+*.ipch
+*.sdf
+*.cachefile
+*.db
+
+# Build output directories
+/Debug/
+/Release/
+/x64/
+/x86/
+/bin/
+/build/
+/out/
+
+# VSCode
+.vscode/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+build/
