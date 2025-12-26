@@ -3,15 +3,17 @@
 #include <iostream>
 #include <memory>
 
+
 using boost::asio::ip::tcp;
 
 class AsyncClient : public std::enable_shared_from_this<AsyncClient>
 {
 public:
-	AsyncClient(boost::asio::io_context& io, const std::string& host, uint16_t port)
+	AsyncClient(boost::asio::io_context& io, const std::string& host, uint16_t port, std::string name)
 		: m_IO(io)
 		, m_Socket(io)
 		, m_Endpoint(boost::asio::ip::make_address(host), port)
+		, m_name(name)
 	{
 	}
 
@@ -48,7 +50,8 @@ private:
 				if (!ec)
 				{
 					std::cout << "Connected to server.\n";
-					DoRead();
+
+					DoLoginRequest();
 				}
 				else
 				{
@@ -57,9 +60,25 @@ private:
 			});
 	}
 
-	// -----------------------------
-	// 2. Read (Echo Server Response)
-	// -----------------------------
+	void DoLoginRequest()
+	{
+		auto self = shared_from_this();
+		boost::asio::async_write(
+			m_Socket,
+			boost::asio::buffer(m_name, m_name.size()),
+			[this, self](boost::system::error_code ec,	std::size_t len)
+			{
+				if (!ec)
+				{
+					DoRead();
+				}
+				else
+				{
+					std::cout << "Login Request Failed" << std::endl;
+				}
+			});
+	}
+
 	void DoRead()
 	{
 		auto self = shared_from_this();
@@ -68,7 +87,7 @@ private:
 			{
 				if (!ec)
 				{
-					std::string msg(m_ReadBuf.data(), len);
+					std::string msg(m_ReadBuf.data(), len); //len 만큼 m_readbuf 읽어서 초기화
 					std::cout << "Server: " << msg << "\n";
 
 					DoRead(); // 계속 읽기
@@ -108,6 +127,8 @@ private:
 	tcp::socket m_Socket;
 	tcp::endpoint m_Endpoint;
 
+	std::string m_name;
+
 	std::array<char, 1024> m_ReadBuf;
 
 	std::deque<std::string> m_WriteQueue;
@@ -115,9 +136,13 @@ private:
 
 int main()
 {
+	std::string name;
+	std::cout << "Nick name:";
+	std::getline(std::cin, name);
+
 	boost::asio::io_context io;
 
-	auto client = std::make_shared<AsyncClient>(io, "127.0.0.1", 7777);
+	auto client = std::make_shared<AsyncClient>(io, "127.0.0.1", 7777, name);
 	client->Start();
 
 	// 입력을 보내는 스레드는 따로
