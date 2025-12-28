@@ -8,26 +8,6 @@ Server::Server(boost::asio::io_context& io, uint16_t port)
 	DoAccept();
 }
 
-bool Server::TryLogin(const std::string& name,
-	std::shared_ptr<Session> session)
-{
-	if (m_list.find(name) != m_list.end())
-		return false;
-
-	m_list[name] = session;
-	session->DoRead();
-	std::cout << name << " login success" << std::endl;
-	return true;
-}
-
-void Server::BroadCast(const std::string& msg)
-{
-	for (auto& Session : m_list)
-	{
-		Session.second->Deliver(msg);
-	}
-}
-
 void Server::DoAccept()
 {
 	m_Acceptor.async_accept(
@@ -44,6 +24,32 @@ void Server::DoAccept()
 		});
 }
 
+bool Server::TryLogin(const std::string& name,
+	std::shared_ptr<Session> session)
+{
+	if (m_list.find(name) != m_list.end())
+	{
+		session->WriteLoginFailed();
+
+		return false;
+	}
+
+	m_list[name] = session;
+	std::cout << name << ": login success" << std::endl;
+	return true;
+}
+
+void Server::BroadCast(pack packet)
+{
+	for (auto& m : m_list)
+	{
+		if (strcmp(m.first.c_str(), packet.name) != 0)
+		{
+			m.second->Send(packet);
+		}
+	}
+}
+
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -53,17 +59,18 @@ void Server::DoAccept()
 void Session::Start()
 {
 	auto self = shared_from_this();
-	m_Socket.async_read_some(boost::asio::buffer(m_ReadBuf),
+	boost::asio::async_read(m_Socket, boost::asio::buffer(&m_ReadBuf, sizeof(pack)),
 		[this, self](boost::system::error_code ec, std::size_t len)
 		{
-			std::string name(m_ReadBuf.data(), len);
-			if (m_Server.TryLogin(name, self))
+			if (m_Server.TryLogin(m_ReadBuf.name, self))
 			{
-				DoRead();
+				Session::WriteLoginSuccess();
+				Session::DoRead();
 			}
 			else
 			{
-				std::cout << "login Failed" << std::endl;
+				Session::WriteLoginFailed();
+				std::cout << m_ReadBuf.name << ": Login Failed" << std::endl;
 			}
 		});
 }
@@ -71,39 +78,88 @@ void Session::Start()
 void Session::DoRead()
 {
 	auto self = shared_from_this();
-	m_Socket.async_read_some(
-		boost::asio::buffer(m_Data),
+	boost::asio::async_read(m_Socket,
+		boost::asio::buffer(&m_ReadBuf,sizeof(pack)),
 		[this, self](boost::system::error_code ec, std::size_t length)
 		{
 			if (!ec)
 			{
-				DoWrite(length);
+				m_Server.BroadCast(m_ReadBuf);
+				DoRead();
 			}
 			else
 			{
-				// Client disconnected
+				Session::Close();
 			}
 		}
 	);
 }
 
-void Session::DoWrite(std::size_t length)
+void Session::Close()
+{
+	boost::system::error_code ec;
+	m_Socket.shutdown(tcp::socket::shutdown_both, ec);
+	m_Socket.close(ec);
+}
+
+
+void Session::WriteLoginFailed()
+{
+	pack loginFailed{};
+	strcpy_s(loginFailed.name, sizeof(loginFailed.name), "SERVER");
+	strcpy_s(loginFailed.msg, sizeof(loginFailed.msg), "LOGIN_FAILED");
+
+	auto self = shared_from_this();
+	boost::asio::async_write(
+		m_Socket, boost::asio::buffer(&loginFailed, sizeof(pack)),
+		[this, self](boost::system::error_code ec, std::size_t /*len*/)
+		{
+			Session::Close();
+		});
+}
+
+void Session::WriteLoginSuccess()
+{
+	pack loginSeccess{};
+	strcpy_s(loginSeccess.name, sizeof(loginSeccess.name), "SERVER");
+	strcpy_s(loginSeccess.msg, sizeof(loginSeccess.msg), "LOGIN_SUCCESS");
+
+	auto self = shared_from_this();
+
+	boost::asio::async_write(
+		m_Socket, boost::asio::buffer(&loginSeccess, sizeof(pack)),
+		[this, self, loginSeccess](boost::system::error_code ec, std::size_t /*len*/)
+		{
+		});
+}
+
+void Session::DoWrite()
 {
 	auto self = shared_from_this();
 	boost::asio::async_write(
 		m_Socket,
-		boost::asio::buffer(m_Data, length),
-		[this, self](boost::system::error_code ec, std::size_t /*len*/)
+		boost::asio::buffer(&m_WriteQueue.front(), sizeof(pack)),
+		[this, self](boost::system::error_code ec, std::size_t)
 		{
 			if (!ec)
 			{
-				DoRead(); // 계속 읽기
+				m_WriteQueue.pop_front();
+				if (!m_WriteQueue.empty())
+					DoWrite();
+			}
+			else
+			{
+				Close();
 			}
 		}
 	);
 }
 
-void Session::Deliver(std::string msg)
+void Session::Send(const pack& packet)
 {
+	bool writing = !m_WriteQueue.empty();
+	m_WriteQueue.push_back(packet);
 
+	if (!writing)
+		DoWrite();
 }

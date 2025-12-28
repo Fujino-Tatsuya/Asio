@@ -4,8 +4,15 @@
 #include <string>
 #include <unordered_map>
 #include <boost/asio.hpp>
+#include <deque>
 
 using boost::asio::ip::tcp;
+
+struct pack
+{
+	char name[32];
+	char msg[256];
+};
 
 class Session;
 
@@ -16,7 +23,7 @@ public:
 
 	bool TryLogin(const std::string& name, std::shared_ptr<Session> session);
 
-	void BroadCast(const std::string& msg);
+	void BroadCast(pack packet);
 private:
 	void DoAccept();
 
@@ -40,17 +47,22 @@ public:
 
 	void Start();
 	void DoRead();
-	void Deliver(std::string msg);
-private:
-
-	void DoWrite(std::size_t length);
+	void WriteLoginFailed();
+	void WriteLoginSuccess();
 
 	
+	void Send(const pack& packet);
+	void DoWrite();
+
+private:
+	void Close();
 
 	tcp::socket m_Socket;
-	char m_Data[1024];
 
-	std::array<char, 1024> m_ReadBuf;
+	pack m_ReadBuf;
 
 	Server& m_Server;
+
+	std::deque<pack> m_WriteQueue;
+	bool m_Writing = false;
 };
